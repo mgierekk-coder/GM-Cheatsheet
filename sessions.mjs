@@ -206,11 +206,11 @@ function collectCategoryData(sessions, slug) {
     for (const c of s.categories) {
       if (slugify(c.name) !== slug) continue;
 
-      for (const e of c.entries) {
+      for (const e of c.entries ?? []) {
         entityMap.set(e.name, e);
       }
 
-      if (c.entries.length) {
+      if (c.entries?.length) {
         if (c.preamble) notes.push({ session: s.title, content: c.preamble });
       } else if (c.content) {
         notes.push({ session: s.title, content: c.content });
@@ -383,13 +383,13 @@ class SessionsApp extends Application {
         ${s.categories.map(c => `
           <div class="gm-cheatsheet-sessions-category-block">
             <h4>${escapeHtml(c.name)}</h4>
-            ${c.entries.length ? c.entries.map(e => `
+            ${c.entries?.length ? c.entries.map(e => `
               <div class="gm-cheatsheet-sessions-entity-mini">
                 <strong>${escapeHtml(e.name)}</strong>
                 ${mdLite(e.description)}
               </div>
             `).join("") : ""}
-            ${c.preamble ? mdLite(c.preamble) : (!c.entries.length ? mdLite(c.content) : "")}
+            ${c.preamble ? mdLite(c.preamble) : (!c.entries?.length ? mdLite(c.content) : "")}
           </div>
         `).join("")}
       </div>
