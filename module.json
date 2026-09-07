@@ -1,0 +1,13 @@
+{
+  "id": "gm-cheatsheet-importer",
+  "title": "Sciaga MG - Importer",
+  "description": "Importuje sciagi MG do wpisow w Dzienniku: foldery wg TYPE, ukryta strona Notatki MG, opcjonalna widoczna Karta gracza, opcjonalny ukryty portret.",
+  "version": "1.0.0",
+  "compatibility": {
+    "minimum": "13",
+    "verified": "13"
+  },
+  "esmodules": [
+    "importer.mjs"
+  ]
+}
