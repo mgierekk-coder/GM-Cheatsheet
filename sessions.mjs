@@ -115,7 +115,7 @@ function parseSessions(raw) {
 
     const rest = lines.join("\n");
 
-    const headerRe = /^##\s*(.+)$/gm;
+    const headerRe = /^##(?!#)\s*(.+)$/gm;
     const headers = [];
     let m;
     while ((m = headerRe.exec(rest)) !== null) {
