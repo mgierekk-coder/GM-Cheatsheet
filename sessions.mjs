@@ -235,6 +235,9 @@ class SessionImportDialog extends Dialog {
       content: `
         <form class="gm-cheatsheet-sessions-form">
           <p>Format: <code>### SESJA: Tytul</code>, sekcje <code>## Kategoria</code>, opcjonalnie w kategorii podnaglowki <code>### Imie</code> z polami (np. WIEK:, RASA:, IMAGE:) i opisem, na koncu <code>### END</code>.</p>
+          <button type="button" class="gm-cheatsheet-sessions-browse-btn">
+            <i class="fas fa-image"></i> Wybierz obrazek (wstawi IMAGE: w miejscu kursora)
+          </button>
           <textarea name="raw" rows="18" style="width:100%; font-family: monospace;" placeholder="### SESJA: 2026-09-21 - Poscig za Grumem&#10;## NPC&#10;### Wodz Grum&#10;WIEK: 45&#10;RASA: Orkowie&#10;Przywodca najezdzcow...&#10;### END">${escapeHtml(prefill)}</textarea>
         </form>
       `,
@@ -257,7 +260,25 @@ class SessionImportDialog extends Dialog {
         },
         cancel: { icon: '<i class="fas fa-times"></i>', label: "Anuluj" }
       },
-      default: "import"
+      default: "import",
+      render: (html) => {
+        const root = html[0] ?? html;
+        const textarea = root.querySelector("textarea[name=raw]");
+        root.querySelector(".gm-cheatsheet-sessions-browse-btn")?.addEventListener("click", () => {
+          new FilePicker({
+            type: "image",
+            callback: (path) => {
+              const insertText = `IMAGE: ${path}\n`;
+              const start = textarea.selectionStart ?? textarea.value.length;
+              const end = textarea.selectionEnd ?? textarea.value.length;
+              textarea.value = textarea.value.slice(0, start) + insertText + textarea.value.slice(end);
+              textarea.focus();
+              const caret = start + insertText.length;
+              textarea.selectionStart = textarea.selectionEnd = caret;
+            }
+          }).render(true);
+        });
+      }
     }, { width: 640, id: "gm-cheatsheet-sessions-import-dialog" });
   }
 }
@@ -527,6 +548,7 @@ function injectStyles() {
     .gm-cheatsheet-entity-image { max-width: 100%; border-radius: 6px; }
     .gm-cheatsheet-entity-fields { display: flex; flex-direction: column; gap: 2px; opacity: 0.9; }
     .gm-cheatsheet-entity-share { margin-top: 4px; }
+    .gm-cheatsheet-sessions-browse-btn { margin-bottom: 6px; }
   `;
   document.head.appendChild(style);
 }
