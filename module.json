@@ -1,8 +1,8 @@
 {
   "id": "gm-cheatsheet-importer",
   "title": "Sciaga MG",
-  "description": "Sesje MG z sesjami, kategoriami i trwalymi kartami postaci (NPC); Progres graczy (zakladki per gracz, stale bonusy z ikonami, paski w stylu wstegi, bezpieczny/ryzykowny awans); Drzewka postepu (zakladki na wiele drzew, edytor grafu DAG z recznym, kierunkowym definiowaniem polaczen i udostepnianiem wezlow graczom).",
-  "version": "2.1.0",
+  "description": "Sesje MG z sesjami, kategoriami i trwalymi kartami postaci (NPC); Progres graczy (zakladki per gracz, 6 bonusow z tierami/mnoznikami, wspolny pasek Wyznawcow, k20 wg tabeli wynikow, reczna edycja wartosci, blokada po ukonczeniu); Drzewka postepu (zakladki na wiele drzew, edytor grafu DAG z recznym, kierunkowym definiowaniem polaczen i udostepnianiem wezlow graczom).",
+  "version": "2.2.0",
   "compatibility": {
     "minimum": "13",
     "verified": "13"
@@ -12,5 +12,5 @@
     "progress.mjs",
     "skilltree.mjs"
   ],
-  "download": "https://github.com/mgierekk-coder/GM-Cheatsheet/releases/download/v2.1.0/module.zip"
+  "download": "https://github.com/mgierekk-coder/GM-Cheatsheet/releases/download/v2.2.0/module.zip"
 }
