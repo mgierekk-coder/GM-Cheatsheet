@@ -1,15 +1,16 @@
 {
   "id": "gm-cheatsheet-importer",
-  "title": "Sciaga MG - Importer",
-  "description": "Importuje sciagi MG do wpisow w Dzienniku (foldery wg TYPE, notatki MG, karta gracza, portret) i osobne okno Sesje MG z sesjami, kategoriami i trwalymi kartami postaci (NPC) - obrazek, pola, opis, alfabetyczna siatka, wyszukiwarka.",
-  "version": "1.3.0",
+  "title": "Sciaga MG",
+  "description": "Sesje MG z sesjami, kategoriami i trwalymi kartami postaci (NPC), Progres graczy (paski postepu z bezpiecznym/ryzykownym awansem) i Drzewka postepu (edytor grafu DAG z udostepnianiem wezlow graczom).",
+  "version": "2.0.0",
   "compatibility": {
     "minimum": "13",
     "verified": "13"
   },
   "esmodules": [
-    "importer.mjs",
-    "sessions.mjs"
+    "sessions.mjs",
+    "progress.mjs",
+    "skilltree.mjs"
   ],
-  "download": "https://github.com/mgierekk-coder/GM-Cheatsheet/releases/download/v1.3.0/module.zip"
+  "download": "https://github.com/mgierekk-coder/GM-Cheatsheet/releases/download/v2.0.0/module.zip"
 }
