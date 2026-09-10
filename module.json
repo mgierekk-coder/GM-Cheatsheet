@@ -1,8 +1,8 @@
 {
   "id": "gm-cheatsheet-importer",
   "title": "Sciaga MG",
-  "description": "Sesje MG z sesjami, kategoriami i trwalymi kartami postaci (NPC); Progres graczy (zakladki per gracz, 8 bonusow - 3 informacyjne, 5 z tierami/mnoznikami - nadwyzka punktow przechodzi na kolejny tier, reczny wybor tieru, auto-reset dla Umiejetnosci i Poczytalnosci, wspolny pasek Wyznawcow, k20 wg tabeli wynikow, reczna edycja wartosci); Drzewka postepu (zakladki na wiele drzew, edytor grafu DAG z recznym, kierunkowym definiowaniem polaczen i udostepnianiem wezlow graczom).",
-  "version": "2.4.0",
+  "description": "Sesje MG z sesjami, kategoriami i trwalymi kartami postaci (NPC); Progres graczy (zakladki per gracz, 8 bonusow - 3 informacyjne, 5 z tierami/mnoznikami - Wyznawcy maja kumulatywna wartosc bez zerowania miedzy tierami, Relacje z NPC to jeden auto-resetujacy sie tier na 30, nadwyzka punktow przechodzi na kolejny tier gdzie indziej, reczny wybor tieru, auto-reset dla Umiejetnosci/Poczytalnosci/NPC, wspolny pasek Wyznawcow, k20 wg tabeli wynikow, reczna edycja wartosci); Drzewka postepu (zakladki na wiele drzew, edytor grafu DAG z recznym, kierunkowym definiowaniem polaczen i udostepnianiem wezlow graczom).",
+  "version": "2.5.0",
   "compatibility": {
     "minimum": "13",
     "verified": "13"
@@ -12,5 +12,5 @@
     "progress.mjs",
     "skilltree.mjs"
   ],
-  "download": "https://github.com/mgierekk-coder/GM-Cheatsheet/releases/download/v2.4.0/module.zip"
+  "download": "https://github.com/mgierekk-coder/GM-Cheatsheet/releases/download/v2.5.0/module.zip"
 }
