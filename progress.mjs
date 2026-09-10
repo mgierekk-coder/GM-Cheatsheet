@@ -5,14 +5,17 @@ const MODULE_ID = "gm-cheatsheet-importer";
 /*  kind "info": no bar, just a static line      */
 /*  kind "tiered": progress bar with N tiers,    */
 /*    each tier has its own cap + multiplier     */
-/*    (so a later tier can use a different       */
-/*    multiplier than an earlier one)            */
 /*  shared: true -> one value for ALL player      */
 /*    tabs instead of one per tab                */
+/*  autoReset: true -> completing the (single)    */
+/*    tier immediately resets it to 0 instead of  */
+/*    staying "completed"/locked                  */
 /* -------------------------------------------- */
 
 const BONUS_DEFS = [
   { id: "exp", label: "Bonus doswiadczenia", icon: "fa-star", kind: "info", infoText: "+5%" },
+  { id: "gimnastyka", label: "Gimnastyka", icon: "fa-dumbbell", kind: "info", infoText: "+1 Hit Die" },
+  { id: "sztuka", label: "Kontakt ze sztuka", icon: "fa-palette", kind: "info", infoText: "Bardic Inspiration 1d6" },
   {
     id: "wyznawcy", label: "Wyznawcy / kongregacja", icon: "fa-place-of-worship", kind: "tiered", shared: true,
     tiers: [{ cap: 10, mult: 3 }, { cap: 100, mult: 3 }, { cap: 1000, mult: 3 }]
@@ -24,11 +27,11 @@ const BONUS_DEFS = [
   },
   {
     id: "umiejetnosc", label: "Umiejetnosc spoza klasy", icon: "fa-graduation-cap", kind: "tiered",
-    tiers: [{ cap: 20, mult: 1 }]
+    tiers: [{ cap: 20, mult: 1 }], autoReset: true
   },
   {
     id: "poczytalnosc", label: "Odzyskiwanie Poczytalnosci", icon: "fa-brain", kind: "tiered",
-    tiers: [{ cap: 20, mult: 1 }]
+    tiers: [{ cap: 20, mult: 1 }], autoReset: true
   },
   {
     id: "npc", label: "Relacje z NPC", icon: "fa-handshake", kind: "tiered",
@@ -87,48 +90,74 @@ async function setProgress(data) {
   await game.settings.set(MODULE_ID, "progress", data);
 }
 
-/** Points already earned toward the CURRENT tier get +points applied.
- *  Reaching/exceeding the tier cap completes that tier: excess is
- *  discarded (does not carry into the next tier) and either the next
- *  tier starts at 0, or — if this was the last tier — the bonus is
- *  marked fully completed and further points have no effect. */
-function applyPoints(state, def, points) {
-  if (state.completed) return state;
-  const tier = def.tiers[state.tierIndex];
-  const val = Math.max(0, state.value + points);
-  if (val >= tier.cap) {
-    if (state.tierIndex >= def.tiers.length - 1) {
-      state.value = tier.cap;
-      state.completed = true;
-    } else {
-      state.tierIndex += 1;
+/**
+ * Adds `points` to the current tier. Overflow past a tier's cap now
+ * CARRIES OVER into the next tier (cascades through several tiers at
+ * once if the roll is big enough), instead of being discarded.
+ * On completing the final tier: if the bonus is `autoReset`, it
+ * immediately loops back to tier 0 / value 0; otherwise it stays
+ * `completed` and further points have no effect (unless bypassCompleted).
+ * Returns { justCompleted, justReset } for chat-message purposes.
+ */
+function applyPoints(state, def, points, { bypassCompleted = false } = {}) {
+  if (state.completed && !bypassCompleted) return { justCompleted: false, justReset: false };
+  if (bypassCompleted) state.completed = false;
+
+  let remaining = points;
+  let justCompleted = false;
+  let justReset = false;
+
+  while (true) {
+    const tier = def.tiers[state.tierIndex];
+    const val = state.value + remaining;
+
+    if (val < 0) {
       state.value = 0;
+      break;
     }
-  } else {
-    state.value = val;
+    if (val >= tier.cap) {
+      const overflow = val - tier.cap;
+      if (state.tierIndex >= def.tiers.length - 1) {
+        state.value = tier.cap;
+        state.completed = true;
+        justCompleted = true;
+        if (def.autoReset) {
+          state.tierIndex = 0;
+          state.value = 0;
+          state.completed = false;
+          justReset = true;
+        }
+        break;
+      } else {
+        state.tierIndex += 1;
+        state.value = 0;
+        remaining = overflow;
+        continue;
+      }
+    } else {
+      state.value = val;
+      break;
+    }
   }
-  return state;
+  return { justCompleted, justReset };
 }
 
-/** Manual override: sets the CURRENT tier's raw value directly (not a
- *  delta). Works even on an already-completed bonus, so the GM can
- *  correct mistakes; setting a value below the tier cap un-completes it. */
+/** Manual override: sets the CURRENT tier's raw value directly, cascading
+ *  overflow the same way applyPoints does. Works even on an already
+ *  completed bonus (bypassCompleted), so a lower value un-completes it. */
 function setAbsolute(state, def, rawValue) {
-  const tier = def.tiers[state.tierIndex];
   const v = Math.max(0, Math.floor(Number(rawValue) || 0));
-  if (v >= tier.cap) {
-    if (state.tierIndex >= def.tiers.length - 1) {
-      state.value = tier.cap;
-      state.completed = true;
-    } else {
-      state.tierIndex += 1;
-      state.value = 0;
-    }
-  } else {
-    state.value = v;
-    state.completed = false;
-  }
-  return state;
+  const delta = v - state.value;
+  return applyPoints(state, def, delta, { bypassCompleted: true });
+}
+
+/** Manual override: jump directly to a different tier (e.g. lowering a
+ *  tier the GM decides was reached by mistake). Resets that tier's value
+ *  to 0 and always un-completes the bonus. */
+function setTierIndex(state, def, tierIndex) {
+  state.tierIndex = Math.max(0, Math.min(def.tiers.length - 1, tierIndex));
+  state.value = 0;
+  state.completed = false;
 }
 
 /* -------------------------------------------- */
@@ -167,7 +196,7 @@ class ProgressApp extends Application {
     return foundry.utils.mergeObject(super.defaultOptions, {
       id: "gm-cheatsheet-progress-app",
       title: "Progres graczy",
-      width: 700,
+      width: 720,
       height: "auto",
       resizable: true,
       classes: ["gm-cheatsheet-progress-app"]
@@ -231,6 +260,11 @@ class ProgressApp extends Application {
     const tierLabel = state.completed
       ? (def.completedLabel ?? "Ukonczono")
       : `Tier ${state.tierIndex + 1}/${def.tiers.length}`;
+    const tierSelect = def.tiers.length > 1
+      ? `<select class="gm-cheatsheet-progress-tier-select" title="Recznie ustaw tier">
+           ${def.tiers.map((t, i) => `<option value="${i}" ${i === state.tierIndex ? "selected" : ""}>Tier ${i + 1}</option>`).join("")}
+         </select>`
+      : "";
 
     return `
       <div class="gm-cheatsheet-progress-row" data-bonus="${def.id}">
@@ -240,6 +274,7 @@ class ProgressApp extends Application {
           <div class="gm-cheatsheet-progress-tier-line">
             <span class="gm-cheatsheet-progress-tier-text">${tierLabel}</span>
             ${tierBadges}
+            ${def.autoReset ? '<span class="gm-cheatsheet-progress-auto-tag">auto-reset</span>' : ""}
             ${def.shared ? '<span class="gm-cheatsheet-progress-shared-tag">wspolny</span>' : ""}
           </div>
         </div>
@@ -251,6 +286,7 @@ class ProgressApp extends Application {
         </div>
         <div class="gm-cheatsheet-progress-controls">
           <input type="color" class="gm-cheatsheet-progress-color" value="${state.color}" title="Kolor paska">
+          ${tierSelect}
           <input type="number" class="gm-cheatsheet-progress-manual" value="${state.value}" min="0" title="Recznie ustaw wartosc biezacego tieru">
           <button type="button" class="gm-cheatsheet-progress-safe" ${state.completed ? "disabled" : ""} title="Bezpieczny postep (+${SAFE_BASE} x ${tier.mult})">
             <i class="fas fa-shield-halved"></i> +${SAFE_BASE * tier.mult}
@@ -325,10 +361,18 @@ class ProgressApp extends Application {
         this.render();
       });
 
+      row.querySelector(".gm-cheatsheet-progress-tier-select")?.addEventListener("change", async (ev) => {
+        const data = getProgress();
+        setTierIndex(getState(data), def, Number(ev.currentTarget.value));
+        await setProgress(data);
+        this.render();
+      });
+
       row.querySelector(".gm-cheatsheet-progress-manual").addEventListener("change", async (ev) => {
         const data = getProgress();
-        setAbsolute(getState(data), def, ev.currentTarget.value);
+        const { justReset } = setAbsolute(getState(data), def, ev.currentTarget.value);
         await setProgress(data);
+        if (justReset) ChatMessage.create({ content: `<strong>${def.label}:</strong> tier ukonczony i automatycznie zresetowany.` });
         this.render();
       });
 
@@ -337,9 +381,9 @@ class ProgressApp extends Application {
         const state = getState(data);
         const tier = def.tiers[state.tierIndex];
         const points = Math.floor(SAFE_BASE * tier.mult);
-        applyPoints(state, def, points);
+        const { justReset } = applyPoints(state, def, points);
         await setProgress(data);
-        ChatMessage.create({ content: `<strong>${def.label}${def.shared ? " (wspolny)" : ""} — bezpieczny postep:</strong> +${points}` });
+        ChatMessage.create({ content: `<strong>${def.label}${def.shared ? " (wspolny)" : ""} — bezpieczny postep:</strong> +${points}${justReset ? " (tier ukonczony, automatycznie zresetowany)" : ""}` });
         this.render();
       });
 
@@ -351,8 +395,9 @@ class ProgressApp extends Application {
         const outcome = baseFromRoll(roll.total);
         const points = Math.floor(outcome.points * tier.mult);
         await roll.toMessage({ flavor: `${def.label}${def.shared ? " (wspolny)" : ""} — ryzykowny postep: ${outcome.label} (${points >= 0 ? "+" : ""}${points})` });
-        applyPoints(state, def, points);
+        const { justReset } = applyPoints(state, def, points);
         await setProgress(data);
+        if (justReset) ChatMessage.create({ content: `<strong>${def.label}:</strong> tier ukonczony i automatycznie zresetowany.` });
         this.render();
       });
     });
@@ -395,9 +440,9 @@ function injectStyles() {
     .gm-cheatsheet-progress-icon { text-align: center; opacity: 0.85; font-size: 15px; }
     .gm-cheatsheet-progress-icon.completed i { color: #3ba55d; text-shadow: 0 0 4px rgba(59,165,93,0.6); }
     .gm-cheatsheet-progress-label { font-weight: bold; font-size: 12px; }
-    .gm-cheatsheet-progress-tier-line { display: flex; align-items: center; gap: 4px; font-weight: normal; opacity: 0.75; font-size: 10px; margin-top: 2px; }
+    .gm-cheatsheet-progress-tier-line { display: flex; align-items: center; gap: 4px; font-weight: normal; opacity: 0.75; font-size: 10px; margin-top: 2px; flex-wrap: wrap; }
     .gm-cheatsheet-progress-tier-badge { color: #3ba55d; font-size: 10px; }
-    .gm-cheatsheet-progress-shared-tag { background: rgba(0,0,0,0.15); border-radius: 3px; padding: 0 4px; }
+    .gm-cheatsheet-progress-shared-tag, .gm-cheatsheet-progress-auto-tag { background: rgba(0,0,0,0.15); border-radius: 3px; padding: 0 4px; }
 
     .gm-cheatsheet-progress-bar-wrap { position: relative; height: 30px; }
     .gm-cheatsheet-progress-ribbon-main, .gm-cheatsheet-progress-ribbon-accent {
@@ -427,6 +472,7 @@ function injectStyles() {
     }
     .gm-cheatsheet-progress-controls { display: flex; align-items: center; gap: 4px; }
     .gm-cheatsheet-progress-color { width: 26px; height: 24px; padding: 0; border: none; background: none; }
+    .gm-cheatsheet-progress-tier-select { max-width: 78px; }
     .gm-cheatsheet-progress-manual { width: 54px; }
     .gm-cheatsheet-progress-safe:disabled, .gm-cheatsheet-progress-risky:disabled { opacity: 0.4; cursor: not-allowed; }
   `;
