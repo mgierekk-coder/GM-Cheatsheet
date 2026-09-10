@@ -12,6 +12,10 @@ const STATE_LABELS = {
   completed: "Ukonczony"
 };
 
+function nodeRadius(node) {
+  return node.size === "large" ? 32 : 20;
+}
+
 /* -------------------------------------------- */
 /*  Storage                                      */
 /* -------------------------------------------- */
@@ -313,18 +317,19 @@ class SkillTreeApp extends Application {
     svg.innerHTML = `
       <defs>
         <marker id="gmch-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
-          <path d="M0,0 L6,3 L0,6 Z" fill="rgba(200,200,200,0.85)"></path>
+          <path d="M0,0 L6,3 L0,6 Z" fill="#000"></path>
         </marker>
       </defs>
     `;
     for (const e of edges) {
       const a = byId.get(e.from), b = byId.get(e.to);
       if (!a || !b) continue;
+      const ra = nodeRadius(a), rb = nodeRadius(b);
       const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      line.setAttribute("x1", a.x + 20);
-      line.setAttribute("y1", a.y + 20);
-      line.setAttribute("x2", b.x + 20);
-      line.setAttribute("y2", b.y + 20);
+      line.setAttribute("x1", a.x + ra);
+      line.setAttribute("y1", a.y + ra);
+      line.setAttribute("x2", b.x + rb);
+      line.setAttribute("y2", b.y + rb);
       line.setAttribute("class", "gm-cheatsheet-skilltree-edge");
       line.setAttribute("marker-end", "url(#gmch-arrow)");
       svg.appendChild(line);
@@ -543,7 +548,7 @@ function injectStyles() {
       background: repeating-linear-gradient(45deg, rgba(0,0,0,0.03) 0 10px, transparent 10px 20px);
     }
     .gm-cheatsheet-skilltree-edges { position: absolute; top: 0; left: 0; pointer-events: none; }
-    .gm-cheatsheet-skilltree-edge { stroke: rgba(200,200,200,0.7); stroke-width: 2; }
+    .gm-cheatsheet-skilltree-edge { stroke: #000; stroke-width: 2; }
     .gm-cheatsheet-skilltree-nodes { position: relative; }
     .gm-cheatsheet-skilltree-node {
       position: absolute; display: flex; align-items: center; justify-content: center;
