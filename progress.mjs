@@ -18,6 +18,7 @@ const BONUS_DEFS = [
   { id: "sztuka", label: "Kontakt ze sztuka", icon: "fa-palette", kind: "info", infoText: "Bardic Inspiration 1d6" },
   {
     id: "wyznawcy", label: "Wyznawcy / kongregacja", icon: "fa-place-of-worship", kind: "tiered", shared: true,
+    noResetOnTierUp: true,
     tiers: [{ cap: 10, mult: 3 }, { cap: 100, mult: 3 }, { cap: 1000, mult: 3 }]
   },
   {
@@ -35,7 +36,7 @@ const BONUS_DEFS = [
   },
   {
     id: "npc", label: "Relacje z NPC", icon: "fa-handshake", kind: "tiered",
-    tiers: [{ cap: 20, mult: 2 }, { cap: 20, mult: 2 }, { cap: 20, mult: 2 }, { cap: 20, mult: 2 }, { cap: 20, mult: 2 }]
+    tiers: [{ cap: 30, mult: 2 }], autoReset: true
   }
 ];
 
@@ -130,8 +131,13 @@ function applyPoints(state, def, points, { bypassCompleted = false } = {}) {
         break;
       } else {
         state.tierIndex += 1;
-        state.value = 0;
-        remaining = overflow;
+        if (def.noResetOnTierUp) {
+          state.value = val;
+          remaining = 0;
+        } else {
+          state.value = 0;
+          remaining = overflow;
+        }
         continue;
       }
     } else {
@@ -156,7 +162,7 @@ function setAbsolute(state, def, rawValue) {
  *  to 0 and always un-completes the bonus. */
 function setTierIndex(state, def, tierIndex) {
   state.tierIndex = Math.max(0, Math.min(def.tiers.length - 1, tierIndex));
-  state.value = 0;
+  state.value = (def.noResetOnTierUp && state.tierIndex > 0) ? def.tiers[state.tierIndex - 1].cap : 0;
   state.completed = false;
 }
 
