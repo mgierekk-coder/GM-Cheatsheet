@@ -1,17 +1,5 @@
 const MODULE_ID = "gm-cheatsheet-importer";
 
-/* -------------------------------------------- */
-/*  Storage                                      */
-/* -------------------------------------------- */
-
-function getTree() {
-  return game.settings.get(MODULE_ID, "skilltree") ?? { nodes: [], edges: [] };
-}
-
-async function setTree(data) {
-  await game.settings.set(MODULE_ID, "skilltree", data);
-}
-
 const STATE_COLORS = {
   locked: "#555555",
   unlocked: "#3b6ea5",
@@ -25,7 +13,28 @@ const STATE_LABELS = {
 };
 
 /* -------------------------------------------- */
+/*  Storage                                      */
+/* -------------------------------------------- */
+
+function makeTree(name) {
+  return { id: foundry.utils.randomID(), name, nodes: [], edges: [] };
+}
+
+function getData() {
+  const data = game.settings.get(MODULE_ID, "skilltree") ?? { trees: [] };
+  if (!Array.isArray(data.trees)) data.trees = [];
+  return data;
+}
+
+async function setData(data) {
+  await game.settings.set(MODULE_ID, "skilltree", data);
+}
+
+/* -------------------------------------------- */
 /*  Auto-layout: layered by graph depth          */
+/*  (used once, when a node is created, so the   */
+/*  user's manual dragging afterwards is never   */
+/*  overwritten automatically)                   */
 /* -------------------------------------------- */
 
 function autoLayout(nodes, edges) {
@@ -60,6 +69,31 @@ function autoLayout(nodes, edges) {
 }
 
 /* -------------------------------------------- */
+/*  Tiny text-prompt dialog                      */
+/* -------------------------------------------- */
+
+function promptText(title, initial = "") {
+  return new Promise((resolve) => {
+    new Dialog({
+      title,
+      content: `<form><input type="text" name="value" value="${initial}" style="width:100%;"></form>`,
+      buttons: {
+        ok: {
+          icon: '<i class="fas fa-check"></i>',
+          label: "OK",
+          callback: (html) => {
+            const el = html[0]?.querySelector?.("input") ?? html.querySelector?.("input");
+            resolve((el?.value ?? "").trim());
+          }
+        },
+        cancel: { icon: '<i class="fas fa-times"></i>', label: "Anuluj", callback: () => resolve(null) }
+      },
+      default: "ok"
+    }, { width: 360 }).render(true);
+  });
+}
+
+/* -------------------------------------------- */
 /*  Main window                                  */
 /* -------------------------------------------- */
 
@@ -70,8 +104,8 @@ class SkillTreeApp extends Application {
     return foundry.utils.mergeObject(super.defaultOptions, {
       id: "gm-cheatsheet-skilltree-app",
       title: "Drzewka postepu",
-      width: 900,
-      height: 650,
+      width: 940,
+      height: 680,
       resizable: true,
       classes: ["gm-cheatsheet-skilltree-app"]
     });
@@ -79,26 +113,55 @@ class SkillTreeApp extends Application {
 
   constructor(options = {}) {
     super(options);
+    this._activeTreeId = null;
     this._selected = null;
-    this._linkMode = false;
-    this._linkFrom = null;
     this._dragCleanup = [];
+    // live node list for the currently rendered tree, kept in sync during drag
+    // so we never need a full re-render (and therefore never lose listeners)
+    this._liveNodes = [];
   }
 
   get isGM() { return game.user.isGM; }
 
-  _visibleNodes(data) {
-    if (this.isGM) return data.nodes;
-    return data.nodes.filter(n => (n.visibleTo ?? []).includes(game.user.id));
+  _currentTree(data) {
+    if (!data.trees.length) {
+      const t = makeTree("Drzewko 1");
+      data.trees.push(t);
+    }
+    if (!this._activeTreeId || !data.trees.some(t => t.id === this._activeTreeId)) {
+      this._activeTreeId = data.trees[0].id;
+    }
+    return data.trees.find(t => t.id === this._activeTreeId);
+  }
+
+  _visibleNodes(tree) {
+    if (this.isGM) return tree.nodes;
+    return tree.nodes.filter(n => (n.visibleTo ?? []).includes(game.user.id));
   }
 
   async _renderInner() {
+    const data = getData();
+    const tree = this._currentTree(data);
+    await setData(data);
+
+    const tabsHtml = data.trees.map(t => `
+      <a class="item ${t.id === this._activeTreeId ? "active" : ""}" data-tree="${t.id}">${t.name}</a>
+    `).join("");
+
     const toolbarHtml = this.isGM ? `
+      <nav class="tabs gm-cheatsheet-skilltree-tabs">
+        ${tabsHtml}
+        <a class="item gm-cheatsheet-skilltree-add-tree" title="Nowe drzewko"><i class="fas fa-plus"></i></a>
+      </nav>
+      <div class="gm-cheatsheet-skilltree-tree-actions">
+        <a class="gm-cheatsheet-skilltree-rename-tree"><i class="fas fa-pen"></i> Zmien nazwe drzewka</a>
+        <a class="gm-cheatsheet-skilltree-delete-tree"><i class="fas fa-trash"></i> Usun drzewko</a>
+      </div>
       <div class="gm-cheatsheet-skilltree-toolbar">
         <button type="button" class="gm-cheatsheet-skilltree-add"><i class="fas fa-plus"></i> Nowy wezel</button>
-        <button type="button" class="gm-cheatsheet-skilltree-link"><i class="fas fa-link"></i> Polacz wezly</button>
         <button type="button" class="gm-cheatsheet-skilltree-layout"><i class="fas fa-sitemap"></i> Auto-uklad</button>
-      </div>` : "";
+      </div>` : `
+      <nav class="tabs gm-cheatsheet-skilltree-tabs">${tabsHtml}</nav>`;
 
     const inspectorHtml = this.isGM
       ? `<div class="gm-cheatsheet-skilltree-inspector"><p class="gm-cheatsheet-sessions-empty">Kliknij wezel, aby edytowac.</p></div>`
@@ -122,13 +185,55 @@ class SkillTreeApp extends Application {
     const root = html[0] ?? html;
     this._root = root;
 
-    if (this.isGM) {
-      root.querySelector(".gm-cheatsheet-skilltree-add").addEventListener("click", () => this._addNode());
-      root.querySelector(".gm-cheatsheet-skilltree-link").addEventListener("click", (ev) => {
-        this._linkMode = !this._linkMode;
-        this._linkFrom = null;
-        ev.currentTarget.classList.toggle("active", this._linkMode);
+    root.querySelectorAll(".gm-cheatsheet-skilltree-tabs .item[data-tree]").forEach(tab => {
+      tab.addEventListener("click", () => {
+        this._activeTreeId = tab.dataset.tree;
+        this._selected = null;
+        this.render();
       });
+    });
+
+    if (this.isGM) {
+      root.querySelector(".gm-cheatsheet-skilltree-add-tree").addEventListener("click", async () => {
+        const name = await promptText("Nowe drzewko", `Drzewko ${getData().trees.length + 1}`);
+        if (!name) return;
+        const data = getData();
+        const t = makeTree(name);
+        data.trees.push(t);
+        await setData(data);
+        this._activeTreeId = t.id;
+        this.render();
+      });
+
+      root.querySelector(".gm-cheatsheet-skilltree-rename-tree").addEventListener("click", async () => {
+        const data = getData();
+        const tree = data.trees.find(t => t.id === this._activeTreeId);
+        const name = await promptText("Zmien nazwe drzewka", tree.name);
+        if (!name) return;
+        tree.name = name;
+        await setData(data);
+        this.render();
+      });
+
+      root.querySelector(".gm-cheatsheet-skilltree-delete-tree").addEventListener("click", async () => {
+        const data = getData();
+        if (data.trees.length <= 1) {
+          ui.notifications.warn("Musi zostac przynajmniej jedno drzewko.");
+          return;
+        }
+        const tree = data.trees.find(t => t.id === this._activeTreeId);
+        const confirmed = await Dialog.confirm({
+          title: "Usun drzewko",
+          content: `<p>Na pewno usunac drzewko "${tree.name}" wraz z wezlami i polaczeniami?</p>`
+        });
+        if (!confirmed) return;
+        data.trees = data.trees.filter(t => t.id !== tree.id);
+        await setData(data);
+        this._activeTreeId = data.trees[0].id;
+        this.render();
+      });
+
+      root.querySelector(".gm-cheatsheet-skilltree-add").addEventListener("click", () => this._addNode());
       root.querySelector(".gm-cheatsheet-skilltree-layout").addEventListener("click", () => this._runAutoLayout());
     }
 
@@ -141,39 +246,25 @@ class SkillTreeApp extends Application {
     return super.close(options);
   }
 
+  /* ---------- rendering ---------- */
+
   _draw() {
-    const data = getTree();
-    const nodes = this._visibleNodes(data);
-    const visibleIds = new Set(nodes.map(n => n.id));
-    const edges = data.edges.filter(e => visibleIds.has(e.from) && visibleIds.has(e.to));
+    const data = getData();
+    const tree = this._currentTree(data);
+    const nodes = this._visibleNodes(tree);
+    this._liveNodes = nodes;
 
     const nodesWrap = this._root.querySelector(".gm-cheatsheet-skilltree-nodes");
-    const svg = this._root.querySelector(".gm-cheatsheet-skilltree-edges");
     nodesWrap.innerHTML = "";
-    svg.innerHTML = "";
-
-    const maxX = Math.max(400, ...nodes.map(n => n.x + 160), 0);
-    const maxY = Math.max(400, ...nodes.map(n => n.y + 100), 0);
-    svg.setAttribute("width", maxX);
-    svg.setAttribute("height", maxY);
-    nodesWrap.style.width = `${maxX}px`;
-    nodesWrap.style.height = `${maxY}px`;
-
-    const byId = new Map(nodes.map(n => [n.id, n]));
-    for (const e of edges) {
-      const a = byId.get(e.from), b = byId.get(e.to);
-      if (!a || !b) continue;
-      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-      line.setAttribute("x1", a.x + 20);
-      line.setAttribute("y1", a.y + 20);
-      line.setAttribute("x2", b.x + 20);
-      line.setAttribute("y2", b.y + 20);
-      line.setAttribute("class", "gm-cheatsheet-skilltree-edge");
-      svg.appendChild(line);
-    }
 
     this._dragCleanup.forEach(fn => fn());
     this._dragCleanup = [];
+    this._nodeDivs = new Map();
+
+    const maxX = Math.max(400, ...nodes.map(n => n.x + 160), 0);
+    const maxY = Math.max(400, ...nodes.map(n => n.y + 100), 0);
+    nodesWrap.style.width = `${maxX}px`;
+    nodesWrap.style.height = `${maxY}px`;
 
     for (const n of nodes) {
       const div = document.createElement("div");
@@ -186,27 +277,57 @@ class SkillTreeApp extends Application {
 
       div.addEventListener("click", (ev) => {
         ev.stopPropagation();
-        if (this.isGM && this._linkMode) {
-          if (!this._linkFrom) {
-            this._linkFrom = n.id;
-            div.classList.add("link-source");
-            return;
-          }
-          if (this._linkFrom !== n.id) this._addEdge(this._linkFrom, n.id);
-          this._linkFrom = null;
-          this._linkMode = false;
-          this._root.querySelector(".gm-cheatsheet-skilltree-link")?.classList.remove("active");
-          return;
-        }
         if (this.isGM) {
           this._selected = n.id;
-          this._draw();
+          this._highlightSelection();
           this._renderInspector(n);
         }
       });
 
       if (this.isGM) this._makeDraggable(div, n);
+      this._nodeDivs.set(n.id, div);
       nodesWrap.appendChild(div);
+    }
+
+    this._redrawEdges();
+  }
+
+  _highlightSelection() {
+    this._nodeDivs?.forEach((div, id) => div.classList.toggle("selected", id === this._selected));
+  }
+
+  /** Lightweight edge redraw — reads live in-memory node positions only,
+   *  never touches node divs/listeners, safe to call on every drag frame. */
+  _redrawEdges() {
+    const data = getData();
+    const tree = this._currentTree(data);
+    const visibleIds = new Set(this._liveNodes.map(n => n.id));
+    const edges = tree.edges.filter(e => visibleIds.has(e.from) && visibleIds.has(e.to));
+    const byId = new Map(this._liveNodes.map(n => [n.id, n]));
+
+    const svg = this._root.querySelector(".gm-cheatsheet-skilltree-edges");
+    const maxX = Math.max(400, ...this._liveNodes.map(n => n.x + 160), 0);
+    const maxY = Math.max(400, ...this._liveNodes.map(n => n.y + 100), 0);
+    svg.setAttribute("width", maxX);
+    svg.setAttribute("height", maxY);
+    svg.innerHTML = `
+      <defs>
+        <marker id="gmch-arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+          <path d="M0,0 L6,3 L0,6 Z" fill="rgba(200,200,200,0.85)"></path>
+        </marker>
+      </defs>
+    `;
+    for (const e of edges) {
+      const a = byId.get(e.from), b = byId.get(e.to);
+      if (!a || !b) continue;
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      line.setAttribute("x1", a.x + 20);
+      line.setAttribute("y1", a.y + 20);
+      line.setAttribute("x2", b.x + 20);
+      line.setAttribute("y2", b.y + 20);
+      line.setAttribute("class", "gm-cheatsheet-skilltree-edge");
+      line.setAttribute("marker-end", "url(#gmch-arrow)");
+      svg.appendChild(line);
     }
   }
 
@@ -214,7 +335,6 @@ class SkillTreeApp extends Application {
     let dragging = false, startX = 0, startY = 0, origX = 0, origY = 0;
 
     const onDown = (ev) => {
-      if (this._linkMode) return;
       dragging = true;
       startX = ev.clientX;
       startY = ev.clientY;
@@ -228,15 +348,17 @@ class SkillTreeApp extends Application {
       node.y = Math.max(0, origY + (ev.clientY - startY));
       div.style.left = `${node.x}px`;
       div.style.top = `${node.y}px`;
-      this._draw();
+      // only reposition edges + this div — never rebuild the node list/listeners
+      this._redrawEdges();
     };
     const onUp = async () => {
       if (!dragging) return;
       dragging = false;
-      const data = getTree();
-      const target = data.nodes.find(n => n.id === node.id);
+      const data = getData();
+      const tree = this._currentTree(data);
+      const target = tree.nodes.find(n => n.id === node.id);
       if (target) { target.x = node.x; target.y = node.y; }
-      await setTree(data);
+      await setData(data);
     };
 
     div.addEventListener("mousedown", onDown);
@@ -249,8 +371,11 @@ class SkillTreeApp extends Application {
     });
   }
 
+  /* ---------- node CRUD ---------- */
+
   async _addNode() {
-    const data = getTree();
+    const data = getData();
+    const tree = this._currentTree(data);
     const node = {
       id: foundry.utils.randomID(),
       label: "Nowy wezel",
@@ -260,31 +385,33 @@ class SkillTreeApp extends Application {
       y: 40,
       visibleTo: []
     };
-    data.nodes.push(node);
-    await setTree(data);
+    tree.nodes.push(node);
+    await setData(data);
     this._selected = node.id;
     this._draw();
     this._renderInspector(node);
   }
 
-  async _addEdge(from, to) {
-    const data = getTree();
-    if (!data.edges.some(e => e.from === from && e.to === to)) data.edges.push({ from, to });
-    await setTree(data);
+  async _runAutoLayout() {
+    const data = getData();
+    const tree = this._currentTree(data);
+    autoLayout(tree.nodes, tree.edges);
+    await setData(data);
     this._draw();
   }
 
-  async _runAutoLayout() {
-    const data = getTree();
-    autoLayout(data.nodes, data.edges);
-    await setTree(data);
-    this._draw();
-  }
+  /* ---------- inspector: edit fields + explicit, directional connections ---------- */
 
   _renderInspector(node) {
     const panel = this._root.querySelector(".gm-cheatsheet-skilltree-inspector");
     if (!panel) return;
+    const data = getData();
+    const tree = this._currentTree(data);
+    const others = tree.nodes.filter(n => n.id !== node.id);
     const players = game.users.filter(u => !u.isGM);
+
+    const outgoing = new Set(tree.edges.filter(e => e.from === node.id).map(e => e.to));
+    const incoming = new Set(tree.edges.filter(e => e.to === node.id).map(e => e.from));
 
     panel.innerHTML = `
       <div class="gm-cheatsheet-skilltree-inspector-row">
@@ -311,17 +438,34 @@ class SkillTreeApp extends Application {
         <div class="gm-cheatsheet-skilltree-i-visible">
           ${players.map(u => `
             <label><input type="checkbox" data-uid="${u.id}" ${(node.visibleTo ?? []).includes(u.id) ? "checked" : ""}> ${u.name}</label>
-          `).join("")}
+          `).join("") || "<em>Brak graczy (nie-GM) w tej grze.</em>"}
+        </div>
+      </div>
+      <div class="gm-cheatsheet-skilltree-inspector-row gm-cheatsheet-skilltree-i-edges-row">
+        <label>Prowadzi do &rarr;</label>
+        <div class="gm-cheatsheet-skilltree-i-edges">
+          ${others.map(n => `
+            <label><input type="checkbox" data-dir="out" data-target="${n.id}" ${outgoing.has(n.id) ? "checked" : ""}> ${n.label}</label>
+          `).join("") || "<em>Brak innych wezlow.</em>"}
+        </div>
+      </div>
+      <div class="gm-cheatsheet-skilltree-inspector-row gm-cheatsheet-skilltree-i-edges-row">
+        <label>&larr; Wymaga</label>
+        <div class="gm-cheatsheet-skilltree-i-edges">
+          ${others.map(n => `
+            <label><input type="checkbox" data-dir="in" data-target="${n.id}" ${incoming.has(n.id) ? "checked" : ""}> ${n.label}</label>
+          `).join("") || "<em>Brak innych wezlow.</em>"}
         </div>
       </div>
       <button type="button" class="gm-cheatsheet-skilltree-i-delete"><i class="fas fa-trash"></i> Usun wezel</button>
     `;
 
     const commit = async (patch) => {
-      const data = getTree();
-      const target = data.nodes.find(n => n.id === node.id);
+      const data = getData();
+      const tree = this._currentTree(data);
+      const target = tree.nodes.find(n => n.id === node.id);
       Object.assign(target, patch);
-      await setTree(data);
+      await setData(data);
       this._draw();
     };
 
@@ -331,21 +475,41 @@ class SkillTreeApp extends Application {
 
     panel.querySelectorAll(".gm-cheatsheet-skilltree-i-visible input").forEach(cb => {
       cb.addEventListener("change", async () => {
-        const data = getTree();
-        const target = data.nodes.find(n => n.id === node.id);
+        const data = getData();
+        const tree = this._currentTree(data);
+        const target = tree.nodes.find(n => n.id === node.id);
         const set = new Set(target.visibleTo ?? []);
         if (cb.checked) set.add(cb.dataset.uid); else set.delete(cb.dataset.uid);
         target.visibleTo = [...set];
-        await setTree(data);
+        await setData(data);
+      });
+    });
+
+    panel.querySelectorAll(".gm-cheatsheet-skilltree-i-edges input").forEach(cb => {
+      cb.addEventListener("change", async () => {
+        const data = getData();
+        const tree = this._currentTree(data);
+        const targetId = cb.dataset.target;
+        const from = cb.dataset.dir === "out" ? node.id : targetId;
+        const to = cb.dataset.dir === "out" ? targetId : node.id;
+        if (cb.checked) {
+          if (!tree.edges.some(e => e.from === from && e.to === to)) tree.edges.push({ from, to });
+        } else {
+          tree.edges = tree.edges.filter(e => !(e.from === from && e.to === to));
+        }
+        await setData(data);
+        this._draw();
+        this._renderInspector(node);
       });
     });
 
     panel.querySelector(".gm-cheatsheet-skilltree-i-delete").addEventListener("click", async () => {
-      const data = getTree();
-      data.nodes = data.nodes.filter(n => n.id !== node.id);
-      data.edges = data.edges.filter(e => e.from !== node.id && e.to !== node.id);
+      const data = getData();
+      const tree = this._currentTree(data);
+      tree.nodes = tree.nodes.filter(n => n.id !== node.id);
+      tree.edges = tree.edges.filter(e => e.from !== node.id && e.to !== node.id);
       this._selected = null;
-      await setTree(data);
+      await setData(data);
       this._draw();
       panel.innerHTML = `<p class="gm-cheatsheet-sessions-empty">Kliknij wezel, aby edytowac.</p>`;
     });
@@ -366,33 +530,40 @@ function injectStyles() {
   style.textContent = `
     .gm-cheatsheet-skilltree-btn { display: inline-flex; align-items: center; gap: 4px; margin: 2px 4px; }
     .gm-cheatsheet-skilltree-root { display: flex; flex-direction: column; height: 100%; }
+    .gm-cheatsheet-skilltree-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid rgba(0,0,0,0.3); margin-bottom: 4px; }
+    .gm-cheatsheet-skilltree-tabs .item { padding: 4px 10px; cursor: pointer; border-radius: 4px 4px 0 0; }
+    .gm-cheatsheet-skilltree-tabs .item.active { background: rgba(0,0,0,0.15); font-weight: bold; }
+    .gm-cheatsheet-skilltree-tree-actions { display: flex; gap: 14px; margin-bottom: 6px; font-size: 12px; }
+    .gm-cheatsheet-skilltree-tree-actions a { cursor: pointer; opacity: 0.8; }
+    .gm-cheatsheet-skilltree-tree-actions a:hover { opacity: 1; }
     .gm-cheatsheet-skilltree-toolbar { display: flex; gap: 6px; margin-bottom: 6px; }
-    .gm-cheatsheet-skilltree-toolbar button.active { background: rgba(138,109,59,0.4); }
     .gm-cheatsheet-skilltree-canvas-wrap {
       position: relative; flex: 1; overflow: auto;
       border: 1px solid rgba(0,0,0,0.3);
       background: repeating-linear-gradient(45deg, rgba(0,0,0,0.03) 0 10px, transparent 10px 20px);
     }
     .gm-cheatsheet-skilltree-edges { position: absolute; top: 0; left: 0; pointer-events: none; }
-    .gm-cheatsheet-skilltree-edge { stroke: rgba(0,0,0,0.5); stroke-width: 2; }
+    .gm-cheatsheet-skilltree-edge { stroke: rgba(200,200,200,0.7); stroke-width: 2; }
     .gm-cheatsheet-skilltree-nodes { position: relative; }
     .gm-cheatsheet-skilltree-node {
       position: absolute; display: flex; align-items: center; justify-content: center;
-      border-radius: 50%; border: 3px solid var(--gmch-node-color, #555);
-      background: rgba(20,20,20,0.85); color: #fff; cursor: pointer; text-align: center;
+      border-radius: 50%; border: 2px solid rgba(0,0,0,0.6);
+      background: var(--gmch-node-color, #555);
+      color: #fff; cursor: pointer; text-align: center;
       padding: 4px; user-select: none;
+      box-shadow: inset 0 0 8px rgba(0,0,0,0.35);
     }
     .gm-cheatsheet-skilltree-node-small { width: 40px; height: 40px; font-size: 9px; }
     .gm-cheatsheet-skilltree-node-large { width: 64px; height: 64px; font-size: 11px; }
-    .gm-cheatsheet-skilltree-node.selected { outline: 2px solid #fff; }
-    .gm-cheatsheet-skilltree-node.link-source { outline: 2px dashed #ffd166; }
+    .gm-cheatsheet-skilltree-node.selected { outline: 3px solid #fff; }
     .gm-cheatsheet-skilltree-inspector {
       border-top: 1px solid rgba(0,0,0,0.3); margin-top: 6px; padding-top: 6px;
       display: flex; flex-direction: column; gap: 6px;
+      max-height: 220px; overflow-y: auto;
     }
-    .gm-cheatsheet-skilltree-inspector-row { display: flex; align-items: center; gap: 8px; }
-    .gm-cheatsheet-skilltree-inspector-row label { min-width: 90px; }
-    .gm-cheatsheet-skilltree-i-visible { display: flex; flex-wrap: wrap; gap: 8px; }
+    .gm-cheatsheet-skilltree-inspector-row { display: flex; align-items: flex-start; gap: 8px; }
+    .gm-cheatsheet-skilltree-inspector-row label { min-width: 90px; padding-top: 2px; }
+    .gm-cheatsheet-skilltree-i-visible, .gm-cheatsheet-skilltree-i-edges { display: flex; flex-wrap: wrap; gap: 8px; }
   `;
   document.head.appendChild(style);
 }
@@ -406,7 +577,7 @@ Hooks.once("init", () => {
     scope: "world",
     config: false,
     type: Object,
-    default: { nodes: [], edges: [] }
+    default: { trees: [] }
   });
 
   const mod = game.modules.get(MODULE_ID);
